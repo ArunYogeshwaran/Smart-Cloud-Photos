@@ -6,14 +6,17 @@ import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia
 import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Button
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -21,7 +24,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
+import coil.compose.AsyncImage
 import com.ayogeshwaran.smartcloudstorage.FileUtils.copyMediaToSharedStorage
 import com.ayogeshwaran.smartcloudstorage.FileUtils.shareMediaWithGooglePhotos
 import com.ayogeshwaran.smartcloudstorage.FileUtils.uriToFile
@@ -54,7 +59,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
         setContent {
             SmartCloudPhotosTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
@@ -92,20 +96,86 @@ class MainActivity : ComponentActivity() {
 
     private fun compressAndShareMedia(context: Context, uris: List<Uri>) {
         CoroutineScope(Dispatchers.Main).launch {
-            val compressedContentUris = withContext(Dispatchers.IO) {
-                uris.map { uri ->
-                    val file = uriToFile(uri, context)
-                    val compressedImageFile = Compressor.compress(this@MainActivity, file!!) {
-                        quality(COMPRESSED_IMAGE_QUALITY)
+            val mediaComparisonData = withContext(Dispatchers.IO) {
+                MediaComparisonData(
+                    uris.map { uri ->
+                        val file = uriToFile(uri, context)
+                        val originalMedia = Media(uri, file!!.length())
+                        val compressedImageFile = Compressor.compress(this@MainActivity, file) {
+                            quality(COMPRESSED_IMAGE_QUALITY)
+                        }
+                        val compressedMedia = Media(
+                            FileProvider.getUriForFile(
+                                this@MainActivity,
+                                "${this@MainActivity.packageName}.provider",
+                                File(compressedImageFile.path)
+                            ),
+                            compressedImageFile.length()
+                        )
+                        originalMedia to compressedMedia
                     }
-                    FileProvider.getUriForFile(
-                        this@MainActivity,
-                        "${this@MainActivity.packageName}.provider",
-                        File(compressedImageFile.path)
-                    )
+                )
+            }
+
+            setContent {
+                SmartCloudPhotosTheme {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        LazyColumn(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            items(mediaComparisonData.mediaPairs.size) { index ->
+                                val (originalMedia, compressedMedia) = mediaComparisonData.mediaPairs[index]
+                                Row(
+                                    horizontalArrangement = Arrangement.Center,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        modifier = Modifier.padding(16.dp)
+                                    ) {
+                                        Text("Original: ${originalMedia.size / 1024} KB")
+                                        AsyncImage(
+                                            model = originalMedia.uri,
+                                            contentDescription = "Original Image",
+                                            modifier = Modifier.size(150.dp)
+                                        )
+                                    }
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        modifier = Modifier.padding(16.dp)
+                                    ) {
+                                        Text("Compressed: ${compressedMedia.size / 1024} KB")
+                                        AsyncImage(
+                                            model = compressedMedia.uri,
+                                            contentDescription = "Compressed Image",
+                                            modifier = Modifier.size(150.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        Button(
+                            onClick = {
+                                shareMedia(mediaComparisonData.mediaPairs.map {
+                                    it.second.uri
+                                })
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                        ) {
+                            Text("Share Compressed Media")
+                        }
+                    }
                 }
             }
-            shareMedia(compressedContentUris)
         }
     }
 
@@ -140,3 +210,12 @@ fun DefaultPreview() {
         }
     }
 }
+
+data class Media(
+    val uri: Uri,
+    val size: Long
+)
+
+data class MediaComparisonData(
+    val mediaPairs: List<Pair<Media, Media>>
+)
